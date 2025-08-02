@@ -31,13 +31,24 @@ import { isFirefox } from '../../browserUtils';
 
 const constructClient = async (): Promise<ICloudClient> => {
   const clientState = await getBrowserStorageValue('clientState');
+  const credentials = await getBrowserStorageValue('appSpecificCredentials');
 
   if (clientState === undefined) {
     console.debug('constructClient: Using default setupUrl');
-    return new ICloudClient(DEFAULT_SETUP_URL);
+    return new ICloudClient(
+      DEFAULT_SETUP_URL, 
+      undefined, 
+      credentials ? 'app-specific-password' : 'cookies',
+      credentials
+    );
   }
 
-  return new ICloudClient(clientState.setupUrl, clientState.webservices);
+  return new ICloudClient(
+    clientState.setupUrl, 
+    clientState.webservices,
+    credentials ? 'app-specific-password' : 'cookies',
+    credentials
+  );
 };
 
 const performDeauthSideEffects = () => {

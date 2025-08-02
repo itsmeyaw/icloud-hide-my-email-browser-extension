@@ -10,6 +10,7 @@ import React, {
 import ICloudClient, {
   PremiumMailSettings,
   HmeEmail,
+  AppSpecificCredentials,
 } from '../../iCloudClient';
 import './Popup.css';
 import { useBrowserStorageState } from '../../hooks';
@@ -37,6 +38,9 @@ import {
   Spinner,
   TitledComponent,
   Link,
+  AppSpecificPasswordForm,
+  LoadingComponent,
+  MasterPasswordPrompt,
 } from '../../commonComponents';
 import { setBrowserStorageValue, Store } from '../../storage';
 
@@ -49,6 +53,8 @@ import {
   AuthenticatedAction,
   STATE_MACHINE_TRANSITIONS,
   AuthenticatedAndManagingAction,
+  AuthenticatingWithPasswordAction,
+  SignedOutAction,
 } from './stateMachine';
 import {
   CONTEXT_MENU_ITEM_ID,
@@ -58,7 +64,11 @@ import { isFirefox } from '../../browserUtils';
 
 type TransitionCallback<T extends PopupAction> = (action: T) => void;
 
-const SignInInstructions = () => {
+const SignInInstructions = ({ 
+  callback 
+}: { 
+  callback: TransitionCallback<SignedOutAction> 
+}) => {
   const userguideUrl = browser.runtime.getURL('userguide.html');
 
   return (
@@ -66,53 +76,37 @@ const SignInInstructions = () => {
       <div className="space-y-4">
         <div className="text-sm space-y-2">
           <p>
-            To use this extension, sign in to your iCloud account on{' '}
-            <Link
-              href="https://icloud.com"
-              className="font-semibold"
-              aria-label="Go to iCloud.com"
-            >
-              icloud.com
-            </Link>
-            .
+            This extension now uses <span className="font-semibold">App-Specific Passwords</span> for enhanced security.
+            This is more secure than cookie-based authentication and doesn't require you to sign in through icloud.com.
           </p>
           <p>
-            Complete the full sign-in process, including{' '}
-            <span className="font-semibold">two-factor authentication</span> and{' '}
-            <span className="font-semibold">Trust This Browser</span>.
+            You'll need to generate an app-specific password from your Apple Account settings first.
           </p>
         </div>
+        
+        <div className="space-y-2">
+          <button
+            onClick={() => callback('AUTHENTICATE_WITH_PASSWORD')}
+            className="w-full justify-center text-white bg-blue-500 hover:bg-blue-600 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg px-5 py-2.5 text-center inline-flex items-center"
+          >
+            <FontAwesomeIcon icon={faQuestionCircle} className="mr-2" />
+            Sign In with App-Specific Password
+          </button>
+        </div>
+
         <div
-          className="flex p-3 text-sm border text-gray-600 rounded-lg bg-gray-50"
+          className="flex p-3 text-sm border text-blue-600 rounded-lg bg-blue-50 border-blue-200"
           role="alert"
         >
           <FontAwesomeIcon icon={faInfoCircle} className="mr-2 mt-1" />
           <span className="sr-only">Info</span>
           <div>
-            <span className="font-semibold">Pro-tip:</span> Tick the{' '}
-            <span className="font-semibold">Keep me signed in</span> box
+            <span className="font-semibold">New Authentication Method:</span> This extension now uses 
+            App-Specific Passwords instead of requiring you to sign in through icloud.com. This provides 
+            better security and privacy.
           </div>
         </div>
-        {isFirefox && (
-          <div
-            className="flex p-3 text-sm border text-gray-600 rounded-lg bg-gray-50"
-            role="alert"
-          >
-            <FontAwesomeIcon icon={faFirefoxBrowser} className="mr-2 mt-1" />
-            <span className="sr-only">Info</span>
-            <div>
-              If using{' '}
-              <Link
-                href="https://support.mozilla.org/en-US/kb/containers"
-                className="font-semibold"
-                aria-label="Firefox Multi-Account Containers docs"
-              >
-                Firefox Containers
-              </Link>
-              , sign in to iCloud from a tab outside of a container.
-            </div>
-          </div>
-        )}
+
         <div className="grid grid-cols-2 gap-3">
           <a
             href={userguideUrl}
@@ -125,14 +119,13 @@ const SignInInstructions = () => {
             Help
           </a>
           <a
-            href="https://icloud.com"
+            href="https://support.apple.com/en-us/HT204397"
             target="_blank"
             rel="noreferrer"
             className="w-full justify-center text-white bg-sky-400 hover:bg-sky-500 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg px-5 py-2.5 text-center mr-2 inline-flex items-center"
-            aria-label="Go to iCloud.com"
+            aria-label="Learn about App-Specific Passwords"
           >
-            <FontAwesomeIcon icon={faExternalLink} className="mr-1" /> Go to
-            icloud.com
+            <FontAwesomeIcon icon={faExternalLink} className="mr-1" /> Learn More
           </a>
         </div>
       </div>
@@ -224,6 +217,57 @@ const SignOutButton = (props: {
       }}
       label="Sign out"
       icon={faSignOut}
+    />
+  );
+};
+
+const AppSpecificPasswordAuthenticator = ({
+  callback,
+}: {
+  callback: TransitionCallback<AuthenticatingWithPasswordAction>;
+}) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  const [, setClientState] = useBrowserStorageState('clientState', undefined);
+
+  const handleSubmit = async (appleId: string, appSpecificPassword: string, masterPassword: string) => {
+    setIsLoading(true);
+    setError(undefined);
+
+    try {
+      const credentials: AppSpecificCredentials = { appleId, appSpecificPassword };
+      
+      // Try to authenticate with the provided credentials first
+      const client = new ICloudClient(DEFAULT_SETUP_URL, undefined, 'app-specific-password', credentials);
+      await client.authenticate();
+      
+      // If authentication successful, store credentials securely
+      const { storeSecureCredentials } = await import('../../secureStorage');
+      await storeSecureCredentials(appleId, appSpecificPassword, masterPassword);
+      
+      // Store client state
+      await setClientState({
+        setupUrl: DEFAULT_SETUP_URL,
+        webservices: client.webservices,
+      });
+      
+      callback('AUTH_SUCCESS');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed. Please check your credentials.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    callback('AUTH_CANCEL');
+  };
+
+  return (
+    <AppSpecificPasswordForm
+      onSubmit={handleSubmit}
+      onCancel={handleCancel}
+      isLoading={isLoading}
+      error={error}
     />
   );
 };
@@ -751,22 +795,40 @@ const HmeManager = (props: {
   );
 };
 
-const constructClient = (clientState: Store['clientState']): ICloudClient => {
+const constructClient = (
+  clientState: Store['clientState'], 
+  credentials?: AppSpecificCredentials
+): ICloudClient => {
   if (clientState === undefined) {
     throw new Error('Cannot construct client when client state is undefined');
   }
 
-  return new ICloudClient(clientState.setupUrl, clientState.webservices);
+  const client = new ICloudClient(
+    clientState.setupUrl, 
+    clientState.webservices,
+    credentials ? 'app-specific-password' : 'cookies',
+    credentials
+  );
+  
+  return client;
 };
 
 const transitionToNextStateElement = (
   state: PopupState,
   setState: Dispatch<PopupState>,
-  clientState: Store['clientState']
+  clientState: Store['clientState'],
+  credentials?: AppSpecificCredentials
 ): ReactElement => {
   switch (state) {
     case PopupState.SignedOut: {
-      return <SignInInstructions />;
+      const callback = (action: SignedOutAction) =>
+        setState(STATE_MACHINE_TRANSITIONS[state][action]);
+      return <SignInInstructions callback={callback} />;
+    }
+    case PopupState.AuthenticatingWithPassword: {
+      const callback = (action: AuthenticatingWithPasswordAction) =>
+        setState(STATE_MACHINE_TRANSITIONS[state][action]);
+      return <AppSpecificPasswordAuthenticator callback={callback} />;
     }
     case PopupState.Authenticated: {
       const callback = (action: AuthenticatedAction) =>
@@ -774,7 +836,7 @@ const transitionToNextStateElement = (
       return (
         <HmeGenerator
           callback={callback}
-          client={constructClient(clientState)}
+          client={constructClient(clientState, credentials)}
         />
       );
     }
@@ -782,7 +844,7 @@ const transitionToNextStateElement = (
       const callback = (action: AuthenticatedAndManagingAction) =>
         setState(STATE_MACHINE_TRANSITIONS[state][action]);
       return (
-        <HmeManager callback={callback} client={constructClient(clientState)} />
+        <HmeManager callback={callback} client={constructClient(clientState, credentials)} />
       );
     }
     default: {
@@ -800,45 +862,63 @@ const Popup = () => {
 
   const [clientState, setClientState, isClientStateLoading] =
     useBrowserStorageState('clientState', undefined);
+  const [credentials, , isCredentialsLoading] = 
+    useBrowserStorageState('appSpecificCredentials', undefined);
   const [clientAuthStateSynced, setClientAuthStateSynced] = useState(false);
 
   useEffect(() => {
     const syncClientAuthState = async () => {
-      const isAuthenticated =
-        clientState?.setupUrl !== undefined &&
-        (await new ICloudClient(clientState.setupUrl).isAuthenticated());
+      if (clientState?.setupUrl) {
+        try {
+          const client = new ICloudClient(
+            clientState.setupUrl, 
+            clientState.webservices,
+            credentials ? 'app-specific-password' : 'cookies',
+            credentials
+          );
+          
+          const isAuthenticated = await client.isAuthenticated();
 
-      if (isAuthenticated) {
-        setState((prevState) =>
-          prevState === PopupState.SignedOut
-            ? PopupState.Authenticated
-            : prevState
-        );
-      } else {
-        setState(PopupState.SignedOut);
-        setClientState(undefined);
-        performDeauthSideEffects();
+          if (isAuthenticated) {
+            setState((prevState) =>
+              prevState === PopupState.SignedOut
+                ? PopupState.Authenticated
+                : prevState
+            );
+          } else {
+            setState(PopupState.SignedOut);
+            setClientState(undefined);
+            performDeauthSideEffects();
+          }
+        } catch (error) {
+          console.debug('Authentication check failed:', error);
+          setState(PopupState.SignedOut);
+          setClientState(undefined);
+          performDeauthSideEffects();
+        }
       }
 
       setClientAuthStateSynced(true);
     };
 
-    !isClientStateLoading && !clientAuthStateSynced && syncClientAuthState();
+    !isClientStateLoading && !isCredentialsLoading && !clientAuthStateSynced && syncClientAuthState();
   }, [
     setState,
     setClientState,
     clientAuthStateSynced,
     clientState?.setupUrl,
+    credentials,
     isClientStateLoading,
+    isCredentialsLoading,
   ]);
 
   return (
     <div className="min-h-full flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {isStateLoading || !clientAuthStateSynced ? (
+        {isStateLoading || isCredentialsLoading || !clientAuthStateSynced ? (
           <Spinner />
         ) : (
-          transitionToNextStateElement(state, setState, clientState)
+          transitionToNextStateElement(state, setState, clientState, credentials)
         )}
       </div>
     </div>
