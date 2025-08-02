@@ -5,11 +5,34 @@ type ServiceName = 'premiummailsettings';
 export const DEFAULT_SETUP_URL = 'https://setup.icloud.com/setup/ws/1';
 export const CN_SETUP_URL = 'https://setup.icloud.com.cn/setup/ws/1';
 
+export type AppSpecificCredentials = {
+  appleId: string;
+  appSpecificPassword: string;
+};
+
+export type AuthenticationMethod = 'cookies' | 'app-specific-password';
+
 class ICloudClient {
   constructor(
     readonly setupUrl: typeof DEFAULT_SETUP_URL | typeof CN_SETUP_URL,
-    public webservices?: Record<ServiceName, { url: string; status: string }>
+    public webservices?: Record<ServiceName, { url: string; status: string }>,
+    private authMethod: AuthenticationMethod = 'app-specific-password',
+    private credentials?: AppSpecificCredentials
   ) {}
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (this.authMethod === 'app-specific-password' && this.credentials) {
+      // Use HTTP Basic Authentication with Apple ID and app-specific password
+      const basicAuth = btoa(`${this.credentials.appleId}:${this.credentials.appSpecificPassword}`);
+      headers['Authorization'] = `Basic ${basicAuth}`;
+    }
+
+    return headers;
+  }
 
   public async request(
     method: 'GET' | 'POST',
@@ -21,10 +44,18 @@ class ICloudClient {
   ): Promise<unknown> {
     const { headers = {}, data = undefined } = options;
 
+    // Merge authentication headers with provided headers
+    const mergedHeaders = {
+      ...this.getAuthHeaders(),
+      ...headers,
+    };
+
     const response = await fetch(url, {
       method,
-      headers,
+      headers: mergedHeaders,
       body: data !== undefined ? JSON.stringify(data) : undefined,
+      // Include credentials for cookie-based auth (backward compatibility)
+      credentials: this.authMethod === 'cookies' ? 'include' : 'omit',
     });
 
     if (!response.ok) {
@@ -36,6 +67,53 @@ class ICloudClient {
     return await response.json();
   }
 
+  public setCredentials(credentials: AppSpecificCredentials): void {
+    this.credentials = credentials;
+    this.authMethod = 'app-specific-password';
+  }
+
+  public clearCredentials(): void {
+    this.credentials = undefined;
+  }
+
+  public async authenticate(): Promise<void> {
+    if (this.authMethod === 'app-specific-password' && !this.credentials) {
+      throw new Error('App-specific credentials not provided');
+    }
+
+    // For app-specific password authentication, we need to perform initial login
+    if (this.authMethod === 'app-specific-password') {
+      await this.loginWithAppSpecificPassword();
+    }
+  }
+
+  private async loginWithAppSpecificPassword(): Promise<void> {
+    if (!this.credentials) {
+      throw new Error('Credentials not set');
+    }
+
+    try {
+      const loginResponse = await this.request('POST', `${this.setupUrl}/login`, {
+        data: {
+          apple_id: this.credentials.appleId,
+          password: this.credentials.appSpecificPassword,
+          extended_login: false,
+        },
+      });
+
+      // Extract webservices from login response
+      const { webservices } = loginResponse as {
+        webservices: ICloudClient['webservices'];
+      };
+
+      if (webservices) {
+        this.webservices = webservices;
+      }
+    } catch (error) {
+      throw new Error(`Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
   public webserviceUrl(serviceName: ServiceName): string {
     if (this.webservices === undefined) {
       throw new Error('webservices have not been initialised');
@@ -45,8 +123,20 @@ class ICloudClient {
 
   public async isAuthenticated(): Promise<boolean> {
     try {
-      await this.validateToken();
-      return true;
+      if (this.authMethod === 'app-specific-password') {
+        // For app-specific password auth, check if we can successfully make an authenticated request
+        if (!this.credentials) {
+          return false;
+        }
+        
+        // Try to authenticate and validate the session
+        await this.authenticate();
+        return true;
+      } else {
+        // For cookie-based auth, use the existing validation method
+        await this.validateToken();
+        return true;
+      }
     } catch {
       return false;
     }

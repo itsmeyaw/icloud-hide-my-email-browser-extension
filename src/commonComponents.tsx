@@ -1,6 +1,8 @@
 import React, { ButtonHTMLAttributes, DetailedHTMLProps } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faExclamationTriangle, faSignInAlt, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { useState, FormEvent } from 'react';
 
 export const Spinner = () => {
   return (
@@ -104,5 +106,133 @@ export const Link = (
     >
       {children}
     </a>
+  );
+};
+
+export const LoadingComponent = ({ subtitle }: { subtitle?: string }) => {
+  return (
+    <TitledComponent title="Loading" subtitle={subtitle}>
+      <div className="text-center">
+        <FontAwesomeIcon icon={faSpinner} spin size="2x" />
+      </div>
+    </TitledComponent>
+  );
+};
+
+export const AppSpecificPasswordForm = ({
+  onSubmit,
+  onCancel,
+  isLoading = false,
+  error,
+}: {
+  onSubmit: (appleId: string, appSpecificPassword: string) => void;
+  onCancel: () => void;
+  isLoading?: boolean;
+  error?: string;
+}) => {
+  const [appleId, setAppleId] = useState('');
+  const [appSpecificPassword, setAppSpecificPassword] = useState('');
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (appleId.trim() && appSpecificPassword.trim()) {
+      onSubmit(appleId.trim(), appSpecificPassword.trim());
+    }
+  };
+
+  return (
+    <TitledComponent title="iCloud Authentication" subtitle="Sign in with App-Specific Password">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="appleId" className="block text-sm font-medium text-gray-700 mb-1">
+            Apple ID
+          </label>
+          <input
+            type="email"
+            id="appleId"
+            value={appleId}
+            onChange={(e) => setAppleId(e.target.value)}
+            placeholder="your.email@example.com"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            required
+            disabled={isLoading}
+          />
+        </div>
+        
+        <div>
+          <label htmlFor="appPassword" className="block text-sm font-medium text-gray-700 mb-1">
+            App-Specific Password
+          </label>
+          <input
+            type="password"
+            id="appPassword"
+            value={appSpecificPassword}
+            onChange={(e) => setAppSpecificPassword(e.target.value)}
+            placeholder="xxxx-xxxx-xxxx-xxxx"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            required
+            disabled={isLoading}
+          />
+        </div>
+
+        {error && (
+          <div className="flex p-3 text-sm border text-red-600 rounded-lg bg-red-50 border-red-200" role="alert">
+            <FontAwesomeIcon icon={faExclamationTriangle} className="mr-2 mt-1" />
+            <span className="sr-only">Error</span>
+            <div>{error}</div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <button
+            type="submit"
+            disabled={isLoading || !appleId.trim() || !appSpecificPassword.trim()}
+            className="w-full justify-center text-white bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg px-5 py-2.5 text-center inline-flex items-center"
+          >
+            {isLoading ? (
+              <>
+                <FontAwesomeIcon icon={faSpinner} spin className="mr-2" />
+                Signing In...
+              </>
+            ) : (
+              <>
+                <FontAwesomeIcon icon={faSignInAlt} className="mr-2" />
+                Sign In
+              </>
+            )}
+          </button>
+          
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isLoading}
+            className="w-full justify-center text-gray-700 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 focus:ring-4 focus:outline-none focus:ring-gray-300 font-medium rounded-lg px-5 py-2.5 text-center inline-flex items-center"
+          >
+            <FontAwesomeIcon icon={faTimes} className="mr-2" />
+            Cancel
+          </button>
+        </div>
+
+        <div className="text-xs text-gray-500 space-y-2">
+          <p>
+            <strong>What is an App-Specific Password?</strong>
+          </p>
+          <p>
+            An app-specific password is a unique password that allows this extension to access your iCloud account securely. 
+            It's different from your regular Apple ID password.
+          </p>
+          <p>
+            <a 
+              href="https://support.apple.com/en-us/HT204397" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-700 underline"
+            >
+              Learn how to generate an app-specific password →
+            </a>
+          </p>
+        </div>
+      </form>
+    </TitledComponent>
   );
 };
