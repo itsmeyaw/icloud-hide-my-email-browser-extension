@@ -18,6 +18,12 @@ export type AppSpecificCredentials = {
   isEncrypted?: boolean;
 };
 
+export type SecureCredentials = {
+  appleId: string; // Stored in plaintext (not sensitive)
+  encryptedPassword: import('./crypto').EncryptedData; // App-specific password encrypted with AES-GCM
+  version: number; // For future migration compatibility
+};
+
 export type AuthenticationMode = 'cookies' | 'app-specific-password';
 
 export type Store = {
@@ -29,7 +35,8 @@ export type Store = {
   };
   // New fields for app-specific password authentication
   authenticationMode: AuthenticationMode;
-  appSpecificCredentials?: AppSpecificCredentials;
+  appSpecificCredentials?: AppSpecificCredentials; // Legacy - deprecated
+  secureCredentials?: SecureCredentials; // New encrypted storage
 };
 
 export const DEFAULT_STORE = {
@@ -43,6 +50,7 @@ export const DEFAULT_STORE = {
   clientState: undefined,
   authenticationMode: 'app-specific-password' as AuthenticationMode,
   appSpecificCredentials: undefined,
+  secureCredentials: undefined,
 };
 
 export async function getBrowserStorageValue<K extends keyof Store>(

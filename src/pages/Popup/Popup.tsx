@@ -40,6 +40,7 @@ import {
   Link,
   AppSpecificPasswordForm,
   LoadingComponent,
+  MasterPasswordPrompt,
 } from '../../commonComponents';
 import { setBrowserStorageValue, Store } from '../../storage';
 
@@ -228,21 +229,23 @@ const AppSpecificPasswordAuthenticator = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [, setClientState] = useBrowserStorageState('clientState', undefined);
-  const [, setCredentials] = useBrowserStorageState('appSpecificCredentials', undefined);
 
-  const handleSubmit = async (appleId: string, appSpecificPassword: string) => {
+  const handleSubmit = async (appleId: string, appSpecificPassword: string, masterPassword: string) => {
     setIsLoading(true);
     setError(undefined);
 
     try {
       const credentials: AppSpecificCredentials = { appleId, appSpecificPassword };
       
-      // Try to authenticate with the provided credentials
+      // Try to authenticate with the provided credentials first
       const client = new ICloudClient(DEFAULT_SETUP_URL, undefined, 'app-specific-password', credentials);
       await client.authenticate();
       
-      // If successful, store the credentials and client state
-      await setCredentials(credentials);
+      // If authentication successful, store credentials securely
+      const { storeSecureCredentials } = await import('../../secureStorage');
+      await storeSecureCredentials(appleId, appSpecificPassword, masterPassword);
+      
+      // Store client state
       await setClientState({
         setupUrl: DEFAULT_SETUP_URL,
         webservices: client.webservices,
